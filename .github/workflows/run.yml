@@ -7,7 +7,7 @@ on:
 
 jobs:
   run:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v6
@@ -17,6 +17,11 @@ jobs:
         with:
           node-version: "lts/*"
           cache: "npm"
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
 
       - name: Install Linguist dependencies
         run: |
@@ -28,11 +33,18 @@ jobs:
             libicu-dev \
             zlib1g-dev \
             libcurl4-openssl-dev \
-            libssl-dev \
-            ruby-dev
+            libssl-dev
+
+      - name: Show Ruby environment
+        run: |
+          ruby --version
+          gem --version
+          which ruby
+          gcc --version
+          g++ --version
 
       - name: Install GitHub Linguist
-        run: sudo gem install github-linguist
+        run: gem install github-linguist --no-document
 
       - run: npm ci
 
