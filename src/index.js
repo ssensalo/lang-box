@@ -29,48 +29,104 @@ const { GH_TOKEN, GIST_ID, USERNAME, DAYS } = process.env;
     const perPage = 100;
     const pages = Math.ceil(maxEvents / perPage);
     const fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
+    
     const commits = [];
-    try {
-      for (let page = 0; page < pages; page++) {
-        // https://docs.github.com/en/developers/webhooks-and-events/github-event-types#pushevent
-        const pushEvents = (
-          await api.fetch(
-            `/users/${username}/events?per_page=${perPage}&page=${page}`
-          )
-        ).filter(
-          ({ type, actor }) => type === "PushEvent" && actor.login === username
+    const seenCommits = new Set();
+    
+    const isZeroSha = (sha) => !sha || /^0+$/.test(sha);
+    
+    for (let page = 1; page <= pages; page++) {
+      try {
+        const events = await api.fetch(
+          `/users/${username}/events?per_page=${perPage}&page=${page}`
         );
-
+    
+        const pushEvents = events.filter(
+          ({ type, actor }) =>
+            type === "PushEvent" &&
+            actor.login === username
+        );
+    
         const recentPushEvents = pushEvents.filter(
           ({ created_at }) => new Date(created_at) > fromDate
         );
-        const isEnd = recentPushEvents.length < pushEvents.length;
+    
         console.log(`${recentPushEvents.length} events fetched.`);
-
-        commits.push(
-          ...(
-            await Promise.allSettled(
-              recentPushEvents.flatMap(({ repo, payload }) =>
-                payload.commits
-                  // Ignore duplicated commits
-                  .filter((c) => c.distinct === true)
-                  .map((c) => api.fetch(`/repos/${repo.name}/commits/${c.sha}`))
-              )
-            )
-          )
-            .filter(({ status }) => status === "fulfilled")
-            .map(({ value }) => value)
-        );
-
+    
+        for (const { repo, payload } of recentPushEvents) {
+          const { before, head } = payload ?? {};
+    
+          // Ignore branch/tag deletion events
+          if (isZeroSha(head)) {
+            continue;
+          }
+    
+          let commitShas = [head];
+    
+          /*
+           * Current PushEvent payloads no longer provide payload.commits.
+           * Use before/head to retrieve the commits contained in the push.
+           */
+          if (!isZeroSha(before) && before !== head) {
+            try {
+              const comparison = await api.fetch(
+                `/repos/${repo.name}/compare/${before}...${head}`
+              );
+    
+              commitShas = (comparison.commits ?? []).map(
+                (commit) => commit.sha
+              );
+            } catch (e) {
+              console.warn(
+                `Could not compare ${repo.name} ${before}...${head}:`,
+                e.message
+              );
+    
+              // Fall back to at least processing the head commit.
+              commitShas = [head];
+            }
+          }
+    
+          for (const sha of commitShas) {
+            const key = `${repo.name}:${sha}`;
+    
+            if (seenCommits.has(key)) {
+              continue;
+            }
+    
+            seenCommits.add(key);
+    
+            try {
+              const commit = await api.fetch(
+                `/repos/${repo.name}/commits/${sha}`
+              );
+    
+              commits.push(commit);
+            } catch (e) {
+              console.warn(
+                `Could not fetch commit ${repo.name}@${sha}:`,
+                e.message
+              );
+            }
+          }
+        }
+    
+        const isEnd =
+          pushEvents.length === 0 ||
+          recentPushEvents.length < pushEvents.length;
+    
         if (isEnd) {
           break;
         }
+      } catch (e) {
+        console.error(
+          `Failed fetching GitHub events page ${page}:`,
+          e
+        );
+        throw e;
       }
-    } catch (e) {
-      console.log("no more page to load");
     }
-
+    
     console.log(`${commits.length} commits fetched.`);
     console.log(`\n`);
 
