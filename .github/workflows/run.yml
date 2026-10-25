@@ -8,6 +8,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v6
 
@@ -17,10 +18,24 @@ jobs:
           node-version: "lts/*"
           cache: "npm"
 
-      - run: sudo apt-get update
-      - run: sudo apt-get install cmake pkg-config libicu-dev zlib1g-dev libcurl4-openssl-dev libssl-dev ruby-dev
-      - run: sudo gem install github-linguist
+      - name: Install Linguist dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            pkg-config \
+            libicu-dev \
+            zlib1g-dev \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            ruby-dev
+
+      - name: Install GitHub Linguist
+        run: sudo gem install github-linguist
+
       - run: npm ci
+
       - run: npm start
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
